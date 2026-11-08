@@ -1,0 +1,73 @@
+# documentation: https://surrealdb.com/docs/surrealdb/installation/running/docker
+# slogan: Distributed SurrealDB cluster backed by TiKV transactional key-value storage.
+# category: database
+# tags: surrealdb, tikv, database, distributed, cluster, graph, vector
+# logo: svgs/surrealdb.svg
+# port: 8000
+
+services:
+  pd:
+    image: pingcap/pd:v8.5.0
+    command:
+      - --name=pd
+      - --data-dir=/data/pd
+      - --client-urls=http://0.0.0.0:2379
+      - --peer-urls=http://0.0.0.0:2380
+      - --advertise-client-urls=http://pd:2379
+      - --advertise-peer-urls=http://pd:2380
+      - --initial-cluster=pd=http://pd:2380
+    volumes:
+      - tikv-pd-data:/data/pd
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q --spider http://127.0.0.1:2379/pd/api/v1/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tikv:
+    image: pingcap/tikv:v8.5.0
+    depends_on:
+      pd:
+        condition: service_healthy
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=tikv:20160
+      - --data-dir=/data/tikv
+      - --pd=pd:2379
+    volumes:
+      - tikv-store-data:/data/tikv
+
+  surrealdb:
+    image: surrealdb/surrealdb:v2.1.4
+    depends_on:
+      pd:
+        condition: service_healthy
+      tikv:
+        condition: service_started
+    command:
+      - start
+      - --log
+      - info
+      - --user
+      - ${SERVICE_USER_SURREAL}
+      - --pass
+      - ${SERVICE_PASSWORD_SURREAL}
+      - --bind
+      - 0.0.0.0:8000
+      - tikv://pd:2379
+    environment:
+      - SERVICE_URL_SURREALDB_8000
+      - SURREAL_USER=${SERVICE_USER_SURREAL}
+      - SURREAL_PASS=${SERVICE_PASSWORD_SURREAL}
+    healthcheck:
+      test:
+        - CMD
+        - /surreal
+        - is-ready
+        - --conn
+        - http://127.0.0.1:8000
+      interval: 10s
+      timeout: 5s
+      retries: 5
